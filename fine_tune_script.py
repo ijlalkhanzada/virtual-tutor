@@ -1,8 +1,7 @@
 from datasets import Dataset, load_dataset
 from transformers import DataCollatorWithPadding
-from transformers import AutoTokenizer,  AutoModelForQuestionAnswering, TrainingArguments, Trainer
+from transformers import AutoTokenizer, AutoModelForQuestionAnswering, TrainingArguments, Trainer
 import json
-
 
 # Load custom dataset
 def load_custom_dataset(filepath):
@@ -26,8 +25,8 @@ def prepare_data(dataset):
         contexts.append(item["context"])
         questions.append(item["question"])
         answers.append({
-            "text": item["answers"]["text"][0],
-            "answer_start": item["answers"]["answer_start"][0]
+            "text": item["answers"]["text"],
+            "answer_start": item["answers"]["answer_start"]
         })
 
     return {"context": contexts, "question": questions, "answers": answers}
@@ -55,16 +54,14 @@ def preprocess_function(examples):
     end_positions = []
 
     for i in range(len(questions)):
-        # Handle answers["text"] and answers["answer_start"]
-        if isinstance(examples["answers"]["text"], list):
-            answer_text = examples["answers"]["text"][0]  # First answer
-        else:
-            answer_text = examples["answers"]["text"]  # Single answer
+        # Ensure "text" and "answer_start" are lists
+        if not isinstance(examples["answers"]["text"], list):
+            examples["answers"]["text"] = [examples["answers"]["text"]]
+        if not isinstance(examples["answers"]["answer_start"], list):
+            examples["answers"]["answer_start"] = [examples["answers"]["answer_start"]]
 
-        if isinstance(examples["answers"]["answer_start"], list):
-            answer_start = examples["answers"]["answer_start"][0]  # First start position
-        else:
-            answer_start = examples["answers"]["answer_start"]  # Single start position
+        answer_text = examples["answers"]["text"][0]
+        answer_start = examples["answers"]["answer_start"][0]
 
         start_positions.append(answer_start)
         end_positions.append(answer_start + len(answer_text))
@@ -74,37 +71,38 @@ def preprocess_function(examples):
 
     return inputs
 
-
 # Convert dataset to Hugging Face format
 hf_dataset = Dataset.from_dict(processed_data)
 tokenized_dataset = hf_dataset.map(preprocess_function, batched=True)
 
 # Split Dataset into Train/Test
-tokenized_dataset = tokenized_dataset.train_test_split(test_size=0.1)
+split_dataset = tokenized_dataset.train_test_split(test_size=0.1)
+train_dataset = split_dataset["train"]
+eval_dataset = split_dataset["test"]
 
 # Define Training Arguments
 training_args = TrainingArguments(
     output_dir="./results",
-    evaluation_strategy="no",  # یا "steps" اگر آپ evaluation کرنا چاہتے ہیں
+    evaluation_strategy="epoch",  # Perform evaluation after each epoch
     learning_rate=2e-5,
     per_device_train_batch_size=8,
     num_train_epochs=3,
     weight_decay=0.01,
     save_strategy="epoch",
-    logging_dir="./logs"
+    logging_dir="./logs",
+    logging_steps=10,
 )
 
 data_collator = DataCollatorWithPadding(tokenizer)
-
 
 # Initialize Trainer
 trainer = Trainer(
     model=model,
     args=training_args,
-    train_dataset=tokenized_dataset["train"],  # Use the training set
-    eval_dataset=tokenized_dataset["test"],    # Use the validation set
+    train_dataset=train_dataset,
+    eval_dataset=eval_dataset,
     tokenizer=tokenizer,
-    data_collator=None,  # Default data collator
+    data_collator=data_collator,
 )
 
 # Train the Model
