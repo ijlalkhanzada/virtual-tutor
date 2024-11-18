@@ -10,9 +10,13 @@ from transformers import (
 
 # Load Dataset
 def load_custom_dataset(filepath):
-    with open(filepath, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    return data
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data
+    except Exception as e:
+        print(f"Error loading dataset: {e}")
+        return []
 
 # Prepare Data
 def prepare_data(dataset):
@@ -33,6 +37,11 @@ def prepare_data(dataset):
 # Load Dataset
 dataset_path = "dataset.json"
 raw_data = load_custom_dataset(dataset_path)
+
+if not raw_data:
+    print("Dataset is empty or invalid. Please check your dataset.json file.")
+    exit()
+
 processed_data = prepare_data(raw_data)
 
 # Convert to Hugging Face Dataset
@@ -51,21 +60,8 @@ def preprocess_function(examples):
     end_positions = []
 
     for i in range(len(examples["answers"])):
-        # Check if "answers" is a dictionary or a list
-        answer_data = examples["answers"][i]
-
-        # If "answers" is a dictionary
-        if isinstance(answer_data, dict):
-            answer_text = answer_data["text"]
-            answer_start = answer_data["answer_start"]
-        else:
-            raise TypeError(f"Unexpected format for answers: {answer_data}")
-
-        # If "text" and "answer_start" are lists, pick the first one
-        if isinstance(answer_text, list):
-            answer_text = answer_text[0]
-        if isinstance(answer_start, list):
-            answer_start = answer_start[0]
+        answer_text = examples["answers"][i]["text"][0]
+        answer_start = examples["answers"][i]["answer_start"][0]
 
         start_positions.append(answer_start)
         end_positions.append(answer_start + len(answer_text))
@@ -78,33 +74,24 @@ def preprocess_function(examples):
 # Tokenize Dataset
 model_name = "bert-base-multilingual-cased"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
-tokenized_dataset = hf_dataset.map(preprocess_function, batched=True)
+
+# Map preprocessing to dataset
+try:
+    tokenized_dataset = hf_dataset.map(preprocess_function, batched=True)
+except Exception as e:
+    print(f"Error during tokenization: {e}")
+    exit()
 
 # Split Dataset
-split_dataset = tokenized_dataset.train_test_split(test_size=0.2)
-train_dataset = split_dataset["train"]
-eval_dataset = split_dataset["test"]
-# Dataset ka size check karein
-if len(tokenized_dataset) > 1:
-    # Agar dataset mein 1 se zyada entries hain to split karein
+if len(tokenized_dataset) < 2:
+    print("Dataset is too small to split. Use the entire dataset for training.")
+    train_dataset = tokenized_dataset
+    eval_dataset = tokenized_dataset
+else:
     split_dataset = tokenized_dataset.train_test_split(test_size=0.2)
     train_dataset = split_dataset["train"]
     eval_dataset = split_dataset["test"]
-else:
-    print("Dataset chhota hai. Pura dataset training ke liye use ho raha hai.")
-    train_dataset = tokenized_dataset
-    eval_dataset = tokenized_dataset  # Optional: Evaluation ke liye bhi pura dataset use ho sakta hai
 
-# Trainer ka setup
-trainer = Trainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_dataset,
-    eval_dataset=eval_dataset,
-    tokenizer=tokenizer,
-    data_collator=data_collator,
-)
-a
 # Training Arguments
 training_args = TrainingArguments(
     output_dir="./results",
@@ -114,14 +101,19 @@ training_args = TrainingArguments(
     num_train_epochs=3,
     weight_decay=0.01,
     save_strategy="epoch",
-    logging_dir="./logs"
+    logging_dir="./logs",
+    report_to="none"  # Disable reporting for simplicity
 )
 
 # Data Collator
 data_collator = DataCollatorWithPadding(tokenizer)
 
 # Initialize Model
-model = AutoModelForQuestionAnswering.from_pretrained(model_name)
+try:
+    model = AutoModelForQuestionAnswering.from_pretrained(model_name)
+except Exception as e:
+    print(f"Error loading model: {e}")
+    exit()
 
 # Trainer
 trainer = Trainer(
@@ -134,10 +126,16 @@ trainer = Trainer(
 )
 
 # Train Model
-trainer.train()
+try:
+    trainer.train()
+except Exception as e:
+    print(f"Error during training: {e}")
+    exit()
 
 # Save Model
-trainer.save_model("./fine_tuned_model")
-tokenizer.save_pretrained("./fine_tuned_model")
-
-print("Fine-tuned model has been saved to './fine_tuned_model'.")
+try:
+    trainer.save_model("./fine_tuned_model")
+    tokenizer.save_pretrained("./fine_tuned_model")
+    print("Fine-tuned model has been saved to './fine_tuned_model'.")
+except Exception as e:
+    print(f"Error saving the model: {e}")

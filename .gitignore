@@ -1,1 +1,5 @@
 venv/
+fine_tuned_model/
+results/
+*.safetensors
+*.pt
